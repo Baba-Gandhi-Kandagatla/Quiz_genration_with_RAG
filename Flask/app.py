@@ -17,12 +17,11 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust this for security reasons
+    allow_origins=["*"],  
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Load the text-generation model
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model = AutoModelForCausalLM.from_pretrained(
     "microsoft/Phi-3.5-mini-instruct",
@@ -34,17 +33,20 @@ model = AutoModelForCausalLM.from_pretrained(
 tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3.5-mini-instruct", cache_dir="./micro-chat-T")
 pipe = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
-# Load the sentence transformer model for embedding generation
 embedding_model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', cache_folder="./embed-model")
 
-# FAISS index to store embeddings for vector search
-dimension = 384  # Dimensionality of the embeddings from 'all-MiniLM-L6-v2'
+dimension = 384 
 index = faiss.IndexFlatL2(dimension)
 vector_text_mapping = []
 
-def extract_text_from_docx(file: UploadFile):
+def group_sentences(sentences, group_size=15):
+    grouped = [' '.join(sentences[i:i+group_size]) for i in range(0, len(sentences), group_size)]
+    return grouped
+
+
+def extract_text_from_docx(file):
     """Extract text from a Word document directly from memory."""
-    doc = Document(file.file)
+    doc = Document(file)
     full_text = []
     for paragraph in doc.paragraphs:
         full_text.append(paragraph.text)
@@ -54,6 +56,7 @@ def store_text_in_vector_db(text):
     """Generate embeddings for text and store them in the vector database."""
     global index, vector_text_mapping
     sentences = text.split(".")
+    sentences = group_sentences(sentences)
     embeddings = embedding_model.encode(sentences, convert_to_tensor=False)
     embeddings = np.array(embeddings)
     index.add(embeddings)
@@ -65,8 +68,9 @@ def retrieve_relevant_text(query, top_k=3):
     query_embedding = embedding_model.encode([query], convert_to_tensor=False)
     query_embedding = np.array(query_embedding).astype(np.float32)
     distances, indices = index.search(query_embedding, top_k)
-    if len(distances[0]) == 0 or np.all(distances[0] > 1.3):  # Adjust threshold as needed
-        return None  # No relevant data found
+
+    if len(distances[0]) == 0 or np.all(distances[0] >= 1.3):
+        return None
 
     retrieved_text = [vector_text_mapping[i] for i in indices[0]]
     return " ".join(retrieved_text)
@@ -74,16 +78,14 @@ def retrieve_relevant_text(query, top_k=3):
 
 @app.post("/generate-questions")
 async def generate_questions(
-    file: UploadFile = File(None),  # Word document file is optional
-    topic: str = Form(None),        # Topic is optional
+    file: UploadFile = File(None),  
+    topic: str = Form(None),        
     question_type: str = Form("Mcqs"),
     number_questions: int = Form(6)
 ):
     try:
-        print(file,topic,question_type,number_questions)
         document_text = ""
         
-        # Check if a Word document is provided
         if file and topic:
             document_text = extract_text_from_docx(file)
             store_text_in_vector_db(document_text)
@@ -92,9 +94,9 @@ async def generate_questions(
         else:
             return {"generated_questions": "Please provide both  topic and a Word document."}
 
+        if relevant_text is None:
+            return {"generated_questions": f"No data found regarding the topic:{topic} in the provided document."}
         start_time = time.time()
-
-        # Generate questions using the language model
         messages = [
             {"role": "system", "content": f"You are a helpful AI assistant who generates {number_questions} {question_type} questions from given text."},
             {"role": "user", "content": f"Using the following '{relevant_text}' , generate {number_questions} {question_type} questions on the topic '{topic}'"},
