@@ -73,25 +73,7 @@ app.post('/api/login', async (req, res) => {
   }
 });
 
-// Protected route to generate questions
-app.post('/api/generate-questions', authMiddleware, async (req, res) => {
-  const { topic, file, question_type, number_questions } = req.body;
 
-  try {
-    // Make a request to FastAPI for question generation
-    const response = await axios.post(`${process.env.FASTAPI_URL}/generate-questions`, {
-      topic,
-      file,
-      question_type,
-      number_questions
-    });
-
-    res.json(response.data);
-  } catch (error) {
-    console.error(error);
-    res.status(500).send('Error generating questions');
-  }
-});
 
 // Start the server
 const PORT = process.env.PORT || 5000;
