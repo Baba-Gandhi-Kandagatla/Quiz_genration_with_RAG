@@ -11,7 +11,7 @@ import numpy as np
 from docx import Document
 import time
 from fastapi.middleware.cors import CORSMiddleware
-
+import wiki_scrapy_main
 
 
 app = FastAPI()
@@ -87,7 +87,7 @@ async def generate_questions(
         document_text = ""
         
         if file and topic:
-            document_text = extract_text_from_docx(file)
+            document_text = extract_text_from_docx(file.file)
             store_text_in_vector_db(document_text)
             query = f"{topic}"
             relevant_text = retrieve_relevant_text(query)
@@ -95,14 +95,20 @@ async def generate_questions(
             return {"generated_questions": "Please provide both  topic and a Word document."}
 
         if relevant_text is None:
-            return {"generated_questions": f"No data found regarding the topic:{topic} in the provided document."}
+            document_text = wiki_scrapy_main.get_info(topic)
+            store_text_in_vector_db(document_text)
+            query = f"{topic}"
+            relevant_text = retrieve_relevant_text(query)
+            # return {"error": "No relevant text found in the document."}
+
+        
         start_time = time.time()
         messages = [
             {"role": "system", "content": f"You are a helpful AI assistant who generates {number_questions} {question_type} questions from given text."},
             {"role": "user", "content": f"Using the following '{relevant_text}' , generate {number_questions} {question_type} questions on the topic '{topic}'"},
         ]
         generation_args = {
-            "max_new_tokens": 1000,
+            "max_new_tokens": 1,
             "return_full_text": False,
             "temperature": 0.0,
             "do_sample": False,
